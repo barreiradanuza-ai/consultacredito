@@ -5,7 +5,7 @@ import { NeedsLoginError } from './providers/_browser.js';
 
 const queue = [];
 let running = false;
-const needsLogin = {}; // { claro:true, ... } operadoras com sessão caída
+const needsLogin = {};
 
 export function loginStatus() { return { ...needsLogin }; }
 
@@ -45,7 +45,7 @@ async function handle(job) {
       console.log(`[fluxo] ${provider.name}: consultando lead ${job.leadId} (CPF ${mask(cliente.cpf)})`);
       const r = await provider.consultar(cliente);
       if (r.inconclusivo) {
-        console.warn(`[fluxo] ${provider.name}: resultado inconclusivo. Texto: ${r.raw?.slice(0, 160)}`);
+        console.warn(`[fluxo] ${provider.name}: inconclusivo. Texto: ${r.raw?.slice(0, 160)}`);
         continue;
       }
       results[provider.key] = r.aprovado;
@@ -54,7 +54,7 @@ async function handle(job) {
     } catch (e) {
       if (e instanceof NeedsLoginError) {
         needsLogin[provider.key] = true;
-        console.warn(`[fluxo] ${provider.name}: sessão caída — refaça "npm run login ${provider.key}".`);
+        console.warn(`[fluxo] ${provider.name}: sessão caída.`);
       } else {
         console.error(`[fluxo] ${provider.name}: erro — ${e.message}`);
       }
@@ -62,7 +62,7 @@ async function handle(job) {
   }
 
   if (Object.keys(results).length) {
-    await writeResults(job.leadId, results);
+    await writeResults(job.leadId, results, lead);
     console.log(`[fluxo] lead ${job.leadId} gravado:`, results);
   } else {
     console.warn(`[fluxo] lead ${job.leadId}: nenhuma operadora retornou resultado.`);
@@ -74,8 +74,9 @@ function mask(cpf) {
 }
 
 export function parseWebhook(body) {
-  const leadId =
+  let leadId =
     body?.lead?.id || body?.data?.lead?.id || body?.leadId || body?.data?.id || body?.id;
+  if (leadId) leadId = String(leadId).replace(/[{}"'\s]/g, '').trim();
   const stageName =
     body?.stage?.name || body?.data?.stage?.name || body?.pipelineStage?.name ||
     body?.etapa || body?.data?.etapa || body?.stageName || '';
