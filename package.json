@@ -1,0 +1,21 @@
+{
+  "name": "consultacredito",
+  "version": "1.0.0",
+  "description": "Integração DataCrazy x operadoras (Claro, TIM, Nio): ao entrar um lead na etapa 'Análise de Crédito', consulta o crédito em cada operadora e grava o resultado (Sim/Não) nos campos do lead.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "login": "node src/login.js",
+    "test:consulta": "node src/testClaro.js",
+    "test:datacrazy": "node src/testDatacrazy.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "playwright": "^1.47.0"
+  }
+}
