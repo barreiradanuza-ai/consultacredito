@@ -45,19 +45,15 @@ async function handle(job) {
       console.log(`[fluxo] ${provider.name}: consultando lead ${job.leadId} (CPF ${mask(cliente.cpf)})`);
       const r = await provider.consultar(cliente);
       if (r.inconclusivo) {
-        console.warn(`[fluxo] ${provider.name}: inconclusivo. Texto: ${r.raw?.slice(0, 160)}`);
+        console.warn(`[fluxo] ${provider.name}: inconclusivo. Texto: ${(r.raw||'').slice(0, 200)}`);
         continue;
       }
       results[provider.key] = r.aprovado;
       needsLogin[provider.key] = false;
-      console.log(`[fluxo] ${provider.name}: ${r.aprovado ? 'Aprovado' : 'Reprovado'}`);
+      console.log(`[fluxo] ${provider.name}: ${r.aprovado ? 'Aprovado' : 'Reprovado'} (status: ${r.status || ''})`);
     } catch (e) {
-      if (e instanceof NeedsLoginError) {
-        needsLogin[provider.key] = true;
-        console.warn(`[fluxo] ${provider.name}: sessão caída.`);
-      } else {
-        console.error(`[fluxo] ${provider.name}: erro — ${e.message}`);
-      }
+      console.error(`[fluxo] ${provider.name}: FALHA -> ${e.message}`);
+      if (e instanceof NeedsLoginError) needsLogin[provider.key] = true;
     }
   }
 
@@ -76,7 +72,10 @@ function mask(cpf) {
 export function parseWebhook(body) {
   let leadId =
     body?.lead?.id || body?.data?.lead?.id || body?.leadId || body?.data?.id || body?.id;
-  if (leadId) leadId = String(leadId).replace(/[{}"'\s]/g, '').trim();
+  if (leadId) {
+    const uuid = String(leadId).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    leadId = uuid ? uuid[0] : String(leadId).replace(/[^\w-]/g, '').trim();
+  }
   const stageName =
     body?.stage?.name || body?.data?.stage?.name || body?.pipelineStage?.name ||
     body?.etapa || body?.data?.etapa || body?.stageName || '';
