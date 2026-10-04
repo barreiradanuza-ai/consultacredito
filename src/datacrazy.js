@@ -26,12 +26,10 @@ export async function getLead(id) {
   return api(`/api/v1/leads/${encodeURIComponent(id)}?complete=true`);
 }
 
-// Achata os campos adicionais em uma lista [{id,name,value}], seja qual for o formato.
 function flattenFields(lead) {
   const af = lead?.additionalFields;
   if (!af) return [];
   if (Array.isArray(af)) return af;
-  // objeto-mapa: pode ser { id: {name,value} } ou { nome: valor }
   return Object.entries(af).map(([k, v]) => {
     if (v && typeof v === 'object') return { id: v.id || k, name: v.name || k, value: v.value };
     return { id: k, name: k, value: v };
@@ -41,8 +39,7 @@ function flattenFields(lead) {
 const norm = (s) => String(s || '').trim().toLowerCase();
 
 export function getAdditionalField(lead, nameOrId) {
-  const list = flattenFields(lead);
-  const found = list.find((f) => f.id === nameOrId || norm(f.name) === norm(nameOrId));
+  const found = flattenFields(lead).find((f) => f.id === nameOrId || norm(f.name) === norm(nameOrId));
   return found?.value;
 }
 
@@ -53,17 +50,15 @@ export function extractClientData(lead) {
     cpf: String(getAdditionalField(lead, f.cpf) || '').replace(/\D/g, ''),
     nascimento: getAdditionalField(lead, f.nascimento) || '',
   };
-  // Debug: se faltou CPF, mostra os campos que vieram para calibrar os nomes.
   if (!data.cpf) {
-    const campos = flattenFields(lead).map((f) => `${f.name}=${f.value ?? ''}`);
-    console.log('[datacrazy] campos do lead:', JSON.stringify(campos));
+    console.log('[datacrazy] RAW chaves:', JSON.stringify(Object.keys(lead || {})));
+    console.log('[datacrazy] RAW lead:', JSON.stringify(lead).slice(0, 2000));
   }
   return data;
 }
 
 export function resolveFieldId(lead, nameOrId) {
-  const list = flattenFields(lead);
-  const found = list.find((f) => f.id === nameOrId || norm(f.name) === norm(nameOrId));
+  const found = flattenFields(lead).find((f) => f.id === nameOrId || norm(f.name) === norm(nameOrId));
   return found?.id || nameOrId;
 }
 
@@ -77,8 +72,5 @@ export async function writeResults(leadId, results, lead) {
     additionalFields.push({ id: resolveFieldId(lead, nameOrId), value: aprovado ? 'Sim' : 'Não' });
   }
   if (!additionalFields.length) return null;
-  return api(`/api/v1/leads/${encodeURIComponent(leadId)}`, {
-    method: 'PATCH',
-    body: { additionalFields },
-  });
+  return api(`/api/v1/leads/${encodeURIComponent(leadId)}`, { method: 'PATCH', body: { additionalFields } });
 }
