@@ -35,7 +35,6 @@ function flattenFields(lead) {
     return { id: k, name: k, value: v };
   });
 }
-
 const norm = (s) => String(s || '').trim().toLowerCase();
 
 export function getAdditionalField(lead, nameOrId) {
@@ -45,15 +44,14 @@ export function getAdditionalField(lead, nameOrId) {
 
 export function extractClientData(lead) {
   const f = config.datacrazy.fields;
+  // Prefere campos padrão do lead (taxId/name/birthDate); cai p/ campos personalizados se existirem.
+  const cpf = lead?.taxId || getAdditionalField(lead, f.cpf) || '';
   const data = {
-    nome: getAdditionalField(lead, f.nome) || lead?.name || '',
-    cpf: String(getAdditionalField(lead, f.cpf) || '').replace(/\D/g, ''),
-    nascimento: getAdditionalField(lead, f.nascimento) || '',
+    nome: lead?.name || getAdditionalField(lead, f.nome) || '',
+    cpf: String(cpf).replace(/\D/g, ''),
+    nascimento: lead?.birthDate || getAdditionalField(lead, f.nascimento) || '',
   };
-  if (!data.cpf) {
-    console.log('[datacrazy] RAW chaves:', JSON.stringify(Object.keys(lead || {})));
-    console.log('[datacrazy] RAW lead:', JSON.stringify(lead).slice(0, 2000));
-  }
+  console.log('[datacrazy] cliente:', JSON.stringify({ nome: data.nome, cpf: data.cpf ? data.cpf.length + ' dig' : 'vazio', nascimento: data.nascimento || 'vazio' }));
   return data;
 }
 
