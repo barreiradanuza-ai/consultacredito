@@ -22,42 +22,59 @@ async function api(path, { method = 'GET', body } = {}) {
   return data;
 }
 
-/** GET /api/v1/leads/{id}?complete=true */
 export async function getLead(id) {
   return api(`/api/v1/leads/${encodeURIComponent(id)}?complete=true`);
 }
 
-export function getAdditionalField(lead, fieldId) {
+// Achata os campos adicionais em uma lista [{id,name,value}], seja qual for o formato.
+function flattenFields(lead) {
   const af = lead?.additionalFields;
-  if (!af) return undefined;
-  const list = Array.isArray(af) ? af : [af];
-  const found = list.find((f) => f.id === fieldId || f.name === fieldId);
+  if (!af) return [];
+  if (Array.isArray(af)) return af;
+  // objeto-mapa: pode ser { id: {name,value} } ou { nome: valor }
+  return Object.entries(af).map(([k, v]) => {
+    if (v && typeof v === 'object') return { id: v.id || k, name: v.name || k, value: v.value };
+    return { id: k, name: k, value: v };
+  });
+}
+
+const norm = (s) => String(s || '').trim().toLowerCase();
+
+export function getAdditionalField(lead, nameOrId) {
+  const list = flattenFields(lead);
+  const found = list.find((f) => f.id === nameOrId || norm(f.name) === norm(nameOrId));
   return found?.value;
 }
 
-/** Extrai nome, cpf (só dígitos) e nascimento do lead. */
 export function extractClientData(lead) {
   const f = config.datacrazy.fields;
-  return {
+  const data = {
     nome: getAdditionalField(lead, f.nome) || lead?.name || '',
     cpf: String(getAdditionalField(lead, f.cpf) || '').replace(/\D/g, ''),
     nascimento: getAdditionalField(lead, f.nascimento) || '',
   };
+  // Debug: se faltou CPF, mostra os campos que vieram para calibrar os nomes.
+  if (!data.cpf) {
+    const campos = flattenFields(lead).map((f) => `${f.name}=${f.value ?? ''}`);
+    console.log('[datacrazy] campos do lead:', JSON.stringify(campos));
+  }
+  return data;
 }
 
-/**
- * Grava os resultados por operadora.
- * results: { claro: true|false, tim: true|false, ... } (só as que rodaram)
- * PATCH /api/v1/leads/{id}  com additionalFields = [{id, value:"Sim"|"Não"}]
- */
-export async function writeResults(leadId, results) {
+export function resolveFieldId(lead, nameOrId) {
+  const list = flattenFields(lead);
+  const found = list.find((f) => f.id === nameOrId || norm(f.name) === norm(nameOrId));
+  return found?.id || nameOrId;
+}
+
+export async function writeResults(leadId, results, lead) {
   const map = config.datacrazy.results;
   const additionalFields = [];
   for (const [key, aprovado] of Object.entries(results)) {
     if (aprovado === null || aprovado === undefined) continue;
-    const fieldId = map[key];
-    if (!fieldId) { console.warn(`[datacrazy] sem FIELD_ID para "${key}", pulando gravação.`); continue; }
-    additionalFields.push({ id: fieldId, value: aprovado ? 'Sim' : 'Não' });
+    const nameOrId = map[key];
+    if (!nameOrId) continue;
+    additionalFields.push({ id: resolveFieldId(lead, nameOrId), value: aprovado ? 'Sim' : 'Não' });
   }
   if (!additionalFields.length) return null;
   return api(`/api/v1/leads/${encodeURIComponent(leadId)}`, {
