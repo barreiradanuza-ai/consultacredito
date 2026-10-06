@@ -24,8 +24,19 @@ async function dismissFibraPopup(page) {
 }
  
 async function ensureLoggedIn(page) {
-  await page.goto(`${C.baseUrl}/vendas/viabilidade`, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(2500);
+  page.setDefaultTimeout(60000);
+  page.setDefaultNavigationTimeout(90000);
+  let ok = false;
+  for (let i = 0; i < 2 && !ok; i++) {
+    try {
+      await page.goto(`${C.baseUrl}/vendas/viabilidade`, { waitUntil: 'domcontentloaded', timeout: 90000 });
+      ok = true;
+    } catch (e) {
+      if (i === 1) throw e;
+      await page.waitForTimeout(2000);
+    }
+  }
+  await page.waitForTimeout(3000);
   // Com sessão reaproveitada não tentamos autologin (o Claro tem reCAPTCHA).
   if (page.url().includes('/login')) {
     throw new NeedsLoginError('claro', 'Sessão do Claro expirada — acesse /admin, logue no Claro e clique no botão "Enviar sessão Claro".');
@@ -149,3 +160,4 @@ export const claro = {
     }
   },
 };
+ 
