@@ -1,5 +1,23 @@
 import { config } from '../config.js';
-import { openSession, loginAndSave, NeedsLoginError, parseAprovacao } from './_browser.js';
+import { openSession, loginAndSave, NeedsLoginError } from './_browser.js';
+ 
+/**
+ * Interpreta o resultado do Claro pela REGRA: crédito aprovado = Sim.
+ * Ex.: Status "CONSULTA NÃO APROVADA" + Descrição "APROVADO CRÉDITO/REPROVADO BIOMETRIA" => Sim
+ * (biometria pendente não reprova; só reprova se o crédito em si for reprovado.)
+ */
+function parseClaro(raw) {
+  const text = (raw || '').replace(/\s+/g, ' ').trim();
+  const status = (text.match(/Status:\s*(.*?)\s*(?:Nome:|Descri|CPF:|Data de Nascimento|$)/i) || [])[1] || '';
+  const desc = (text.match(/Descri[cç][aã]o:\s*(.*?)\s*(?:Consulta Banda|INICIAR|FECHAR|Nenhum contrato|$)/i) || [])[1] || '';
+  const blob = `${status} ${desc}`;
+  const creditoAprov = /aprovad[oa]\s*cr[eé]dito|cr[eé]dito\s*aprovad/i.test(blob);
+  const creditoReprov = /reprovad[oa]\s*cr[eé]dito|cr[eé]dito\s*reprovad|sem\s*cr[eé]dito|cr[eé]dito\s*negad/i.test(blob);
+  const statusAprov = /consulta\s*aprovada/i.test(status) && !/n[aã]o\s*aprovada/i.test(status);
+  if (!status && !desc) return { aprovado: null, raw: text, inconclusivo: true };
+  const aprovado = statusAprov || (creditoAprov && !creditoReprov);
+  return { aprovado, raw: text, inconclusivo: false, status, desc };
+}
  
 const C = config.claro;
  
@@ -189,7 +207,7 @@ async function runCreditQuery(page, cliente) {
   await page.waitForTimeout(9000);
  
   const raw = (await page.locator('body').innerText()).replace(/\s+/g, ' ').trim();
-  return parseAprovacao(raw);
+  return parseClaro(raw);
 }
  
 export const claro = {
