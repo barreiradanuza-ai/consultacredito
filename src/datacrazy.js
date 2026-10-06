@@ -91,6 +91,3 @@ export async function writeResults(leadId, results, _lead) {
   }
   return { businessId, gravados };
 }
-  if (!additionalFields.length) return null;
-  return api(`/api/v1/leads/${encodeURIComponent(leadId)}`, { method: 'PATCH', body: { additionalFields } });
-}
