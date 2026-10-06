@@ -67,6 +67,16 @@ app.options('/admin/claro-session', (_req, res) => {
 // Status em JSON (a página consulta a cada poucos segundos).
 app.get('/admin/status', (_req, res) => res.json(sessionInfo()));
  
+// Dispara a análise de um lead manualmente (reprocessar). Protegido pelo token.
+app.get('/admin/run/:leadId', (req, res) => {
+  if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
+  const leadId = String(req.params.leadId || '').replace(/[{}"'\s]/g, '').trim();
+  if (!leadId) return res.status(400).json({ error: 'leadId vazio' });
+  enqueue(leadId);
+  console.log(`[admin] rodada manual enfileirada: ${leadId}`);
+  res.json({ ok: true, enfileirado: leadId });
+});
+ 
 // ---------- Página de login diário ----------
 app.get('/admin', (_req, res) => {
   const claroUrl = config.claro.baseUrl;
