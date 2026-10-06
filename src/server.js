@@ -67,6 +67,22 @@ app.options('/admin/claro-session', (_req, res) => {
 // Status em JSON (a página consulta a cada poucos segundos).
 app.get('/admin/status', (_req, res) => res.json(sessionInfo()));
  
+// Proxy de diagnóstico p/ a API do DataCrazy (achar ids de campos). Protegido pelo token.
+app.get('/admin/dc', async (req, res) => {
+  if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
+  const path = req.query.path;
+  if (!path) return res.status(400).json({ error: 'informe ?path=' });
+  try {
+    const r = await fetch(`${config.datacrazy.baseUrl}${path}`, {
+      headers: { Authorization: `Bearer ${config.datacrazy.token}`, Accept: 'application/json' },
+    });
+    const text = await r.text();
+    res.status(200).json({ status: r.status, body: text.slice(0, 6000) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+ 
 // Dispara a análise de um lead manualmente (reprocessar). Protegido pelo token.
 app.get('/admin/run/:leadId', (req, res) => {
   if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
