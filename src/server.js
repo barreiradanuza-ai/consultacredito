@@ -53,9 +53,20 @@ app.post('/admin/claro-session', express.text({ type: '*/*', limit: '4mb' }), (r
   try { body = JSON.parse(req.body); } catch { return res.status(400).json({ error: 'json inválido' }); }
   if (!body || body.secret !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
   if (!body.state || !Array.isArray(body.state.cookies)) return res.status(400).json({ error: 'state inválido' });
+  // Rejeita sessão vazia / não logada (evita apagar uma sessão boa com uma captura fora do Claro).
+  let autenticado = false;
+  try {
+    const ls = (body.state.origins || []).flatMap((o) => o.localStorage || []);
+    const pr = ls.find((x) => x.name === 'persist:root');
+    if (pr) { const login = JSON.parse(JSON.parse(pr.value).login || '{}'); autenticado = login.authenticated === true; }
+  } catch { autenticado = false; }
+  if (!autenticado) {
+    console.warn('[admin] captura sem login — recusada (não sobrescreve a sessão).');
+    return res.status(400).json({ error: 'nao_logado', msg: 'Capturei uma página SEM login do Claro. Entre no Claro Conexão (logado) e clique o botão lá dentro.' });
+  }
   fs.mkdirSync(path.dirname(STORAGE), { recursive: true });
   fs.writeFileSync(STORAGE, JSON.stringify(body.state));
-  console.log(`[admin] sessão do Claro salva (${body.state.cookies.length} cookies).`);
+  console.log(`[admin] sessão do Claro salva (${body.state.cookies.length} cookies, logado=ok).`);
   res.json({ ok: true, salvo: true, cookies: body.state.cookies.length });
 });
 app.options('/admin/claro-session', (_req, res) => {
@@ -175,6 +186,9 @@ app.get('/admin', (_req, res) => {
   // Favorito (roda na página do Claro): captura sessão e ABRE uma aba no serviço levando os dados
   // no fragmento (#) da URL. Contorna a CSP do Claro (que bloqueia fetch), pois é só navegação.
   var code = "(function(){try{" +
+    "if(location.hostname.indexOf('conexaoclarobrasil')<0){alert('Abra o site do CLARO CONEXAO (logado) e clique este botao LA DENTRO.');return;}" +
+    "var auth=false;try{var pr=JSON.parse(localStorage.getItem('persist:root')||'{}');var lg=JSON.parse(pr.login||'{}');auth=lg.authenticated===true;}catch(e){}" +
+    "if(!auth){alert('Voce nao esta logado no Claro. Faca login e clique o botao de novo.');return;}" +
     "var ck=document.cookie.split('; ').filter(Boolean).map(function(p){var i=p.indexOf('=');" +
     "var n=p.slice(0,i),v=p.slice(i+1);return{name:n,value:v,domain:'.conexaoclarobrasil.com.br',path:'/'," +
     "expires:Math.floor(Date.now()/1000)+60*60*24*30,httpOnly:false,secure:true,sameSite:'Lax'};});" +
