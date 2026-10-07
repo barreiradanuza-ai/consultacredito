@@ -35,13 +35,13 @@ export function getAdditionalField(lead, fieldId) {
   return found?.value;
 }
  
-/** Extrai nome, cpf (só dígitos) e nascimento do lead. */
+/** Extrai nome, cpf (só dígitos) e nascimento do lead. Prioriza campos NATIVOS. */
 export function extractClientData(lead) {
   const f = config.datacrazy.fields;
   return {
-    nome: getAdditionalField(lead, f.nome) || lead?.name || '',
-    cpf: String(getAdditionalField(lead, f.cpf) || '').replace(/\D/g, ''),
-    nascimento: getAdditionalField(lead, f.nascimento) || '',
+    nome: lead?.name || getAdditionalField(lead, f.nome) || '',
+    cpf: String(lead?.taxId || getAdditionalField(lead, f.cpf) || '').replace(/\D/g, ''),
+    nascimento: lead?.birthDate || getAdditionalField(lead, f.nascimento) || '',
   };
 }
  
