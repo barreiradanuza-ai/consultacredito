@@ -4,6 +4,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { enqueue, parseWebhook, loginStatus } from './creditFlow.js';
 import { openSession } from './providers/_browser.js';
+import { tim } from './providers/tim.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -187,6 +188,24 @@ app.get('/admin/tim-login-test', async (req, res) => {
     res.json({ ok: false, erro: e.message });
   } finally {
     if (browser) await browser.close();
+  }
+});
+
+// TESTE do fluxo TIM com um CPF (sem DataCrazy). Ex.: /admin/tim-consulta?token=..&cpf=02255615657
+app.get('/admin/tim-consulta', async (req, res) => {
+  if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
+  const cliente = {
+    cpf: String(req.query.cpf || '').replace(/\D/g, ''),
+    nome: req.query.nome || '',
+    nascimento: req.query.nasc || '',
+    mae: req.query.mae || '',
+  };
+  if (cliente.cpf.length !== 11) return res.status(400).json({ error: 'cpf inválido (11 díg)' });
+  try {
+    const r = await tim.consultar(cliente);
+    res.json({ ok: true, resultado: r });
+  } catch (e) {
+    res.json({ ok: false, erro: e.message });
   }
 });
 
