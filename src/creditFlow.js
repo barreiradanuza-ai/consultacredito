@@ -6,6 +6,7 @@ import { NeedsLoginError } from './providers/_browser.js';
 const queue = [];
 let running = false;
 const needsLogin = {}; // { claro:true, ... } operadoras com sessão caída
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function loginStatus() { return { ...needsLogin }; }
 
@@ -41,25 +42,35 @@ async function handle(job) {
   }
 
   const results = {};
+  const MAX_TENTATIVAS = 3;
   for (const provider of getEnabledProviders()) {
-    try {
-      console.log(`[fluxo] ${provider.name}: consultando lead ${job.leadId} (CPF ${mask(cliente.cpf)})`);
-      const r = await provider.consultar(cliente);
-      console.log(`[debug] ${provider.name} resultado bruto:`, (r.raw || '').slice(0, 700));
-      if (r.inconclusivo) {
-        console.warn(`[fluxo] ${provider.name}: resultado inconclusivo. Texto: ${r.raw?.slice(0, 160)}`);
-        continue;
+    let r = null;
+    for (let tentativa = 1; tentativa <= MAX_TENTATIVAS && !r; tentativa++) {
+      try {
+        console.log(`[fluxo] ${provider.name}: consultando lead ${job.leadId} (CPF ${mask(cliente.cpf)}) — tentativa ${tentativa}`);
+        const res = await provider.consultar(cliente);
+        if (res.inconclusivo) {
+          console.warn(`[fluxo] ${provider.name}: inconclusivo (tent. ${tentativa}). Texto: ${res.raw?.slice(0, 160)}`);
+          // inconclusivo com nascimento ausente é definitivo; senão tenta de novo
+          if (!cliente.nascimento || tentativa === MAX_TENTATIVAS) break;
+          await sleep(2500);
+          continue;
+        }
+        r = res;
+      } catch (e) {
+        if (e instanceof NeedsLoginError) {
+          needsLogin[provider.key] = true;
+          console.warn(`[fluxo] ${provider.name}: sessão caída — relogue pelo /admin.`);
+          break;
+        }
+        console.error(`[fluxo] ${provider.name}: erro tent. ${tentativa} — ${e.message}`);
+        if (tentativa < MAX_TENTATIVAS) await sleep(2500);
       }
+    }
+    if (r) {
       results[provider.key] = r.aprovado;
       needsLogin[provider.key] = false;
       console.log(`[fluxo] ${provider.name}: ${r.aprovado ? 'Aprovado' : 'Reprovado'}`);
-    } catch (e) {
-      if (e instanceof NeedsLoginError) {
-        needsLogin[provider.key] = true;
-        console.warn(`[fluxo] ${provider.name}: sessão caída — refaça "npm run login ${provider.key}".`);
-      } else {
-        console.error(`[fluxo] ${provider.name}: erro — ${e.message}`);
-      }
     }
   }
 
