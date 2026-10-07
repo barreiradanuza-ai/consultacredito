@@ -2,18 +2,18 @@ import { config } from './config.js';
 import { getLead, buildCliente, writeResults } from './datacrazy.js';
 import { getEnabledProviders } from './providers/index.js';
 import { NeedsLoginError } from './providers/_browser.js';
- 
+
 const queue = [];
 let running = false;
 const needsLogin = {}; // { claro:true, ... } operadoras com sessão caída
- 
+
 export function loginStatus() { return { ...needsLogin }; }
- 
+
 export function enqueue(leadId) {
   queue.push({ leadId, tries: 0 });
   processNext();
 }
- 
+
 async function processNext() {
   if (running) return;
   const job = queue.shift();
@@ -29,17 +29,17 @@ async function processNext() {
     if (queue.length) processNext();
   }
 }
- 
+
 async function handle(job) {
   const lead = await getLead(job.leadId);
   const cliente = await buildCliente(job.leadId, lead); // nativos + campos adicionais
   console.log(`[fluxo] cliente: nome="${cliente.nome}" cpf=${cliente.cpf ? cliente.cpf.length + ' díg' : 'vazio'} nasc=${cliente.nascimento ? 'ok' : 'vazio'}`);
- 
+
   if (!cliente.cpf || cliente.cpf.length !== 11) {
     console.warn(`[fluxo] lead ${job.leadId} sem CPF válido ("${cliente.cpf}") — pulando.`);
     return;
   }
- 
+
   const results = {};
   for (const provider of getEnabledProviders()) {
     try {
@@ -62,7 +62,7 @@ async function handle(job) {
       }
     }
   }
- 
+
   if (Object.keys(results).length) {
     await writeResults(job.leadId, results, lead);
     console.log(`[fluxo] lead ${job.leadId} gravado:`, results);
@@ -70,11 +70,11 @@ async function handle(job) {
     console.warn(`[fluxo] lead ${job.leadId}: nenhuma operadora retornou resultado.`);
   }
 }
- 
+
 function mask(cpf) {
   return cpf.replace(/^(\d{3})\d{5}(\d{3})$/, '$1*****$2');
 }
- 
+
 export function parseWebhook(body) {
   let leadId =
     body?.lead?.id || body?.data?.lead?.id || body?.leadId || body?.data?.id || body?.id;
