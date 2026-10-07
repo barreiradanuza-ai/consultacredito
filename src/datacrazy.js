@@ -1,7 +1,7 @@
 import { config } from './config.js';
- 
+
 const { baseUrl, token } = config.datacrazy;
- 
+
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
@@ -21,12 +21,12 @@ async function api(path, { method = 'GET', body } = {}) {
   }
   return data;
 }
- 
+
 /** GET /api/v1/leads/{id}?complete=true */
 export async function getLead(id) {
   return api(`/api/v1/leads/${encodeURIComponent(id)}?complete=true`);
 }
- 
+
 export function getAdditionalField(lead, fieldId) {
   const af = lead?.additionalFields;
   if (!af) return undefined;
@@ -34,7 +34,7 @@ export function getAdditionalField(lead, fieldId) {
   const found = list.find((f) => f.id === fieldId || f.name === fieldId);
   return found?.value;
 }
- 
+
 /** Extrai nome, cpf (só dígitos) e nascimento do lead. Prioriza campos NATIVOS. */
 export function extractClientData(lead) {
   const f = config.datacrazy.fields;
@@ -44,7 +44,7 @@ export function extractClientData(lead) {
     nascimento: lead?.birthDate || getAdditionalField(lead, f.nascimento) || '',
   };
 }
- 
+
 /** Lê os CAMPOS ADICIONAIS do lead (que NÃO vêm no GET do lead) → mapa {nomeDoCampo: valor}. */
 export async function getLeadAdditionalFields(leadId) {
   try {
@@ -62,7 +62,7 @@ export async function getLeadAdditionalFields(leadId) {
     return {};
   }
 }
- 
+
 /**
  * Monta os dados do cliente combinando campos NATIVOS + CAMPOS ADICIONAIS.
  * Alguns leads têm CPF/Nome/Nascimento só nos campos adicionais (ex.: "Data de Nascimento").
@@ -74,9 +74,10 @@ export async function buildCliente(leadId, lead) {
   const nome = lead?.name || first([f.nome, 'Nome Lead', 'Nome']);
   const cpf = String(lead?.taxId || first([f.cpf, 'CPF Lead', 'CPF'])).replace(/\D/g, '');
   const nascimento = lead?.birthDate || first([f.nascimento, 'Data de Nascimento', 'Nascimento Lead', 'Nascimento']);
-  return { nome, cpf, nascimento };
+  const mae = first(['Mãe Lead', 'Mae Lead', 'Nome da Mãe', 'Nome da Mae', 'Mãe', 'Mae']);
+  return { nome, cpf, nascimento, mae };
 }
- 
+
 /** Resolve o ID real de um campo a partir do nome (ou do próprio id), lendo o lead. */
 export function resolveFieldId(lead, nameOrId) {
   const af = lead?.additionalFields;
@@ -85,7 +86,7 @@ export function resolveFieldId(lead, nameOrId) {
   const found = list.find((f) => f.id === nameOrId || f.name === nameOrId);
   return found?.id || nameOrId;
 }
- 
+
 /** Descobre o id do NEGÓCIO (business) ligado ao lead (os campos "Claro Aprovado" são do negócio). */
 export async function getBusinessId(leadId) {
   const data = await api(`/api/v1/leads/${encodeURIComponent(leadId)}/businesses`);
@@ -94,7 +95,7 @@ export async function getBusinessId(leadId) {
   list.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
   return list[0]?.id || null;
 }
- 
+
 /**
  * Grava os resultados por operadora no NEGÓCIO do lead.
  * results: { claro: true|false, tim: ..., nio: ... } (só as que rodaram)
