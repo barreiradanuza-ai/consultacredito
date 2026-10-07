@@ -11,6 +11,8 @@ app.use(express.json({ limit: '1mb' }));
 // Token exclusivo para upload de sessão (não é o WEBHOOK_SECRET).
 const SESSION_TOKEN = process.env.CLARO_SESSION_TOKEN || config.webhookSecret;
 const STORAGE = config.claro.storageState;
+const TIM_STORAGE = '/data/tim-session.json';
+const TIM_URL = 'https://apptimvendas.timbrasil.com.br/';
 
 function sessionInfo() {
   try {
@@ -120,6 +122,74 @@ app.get('/admin/tim-probe', async (req, res) => {
   }
 });
 
+// Recebe a sessão do TIM (cookies+localStorage+IndexedDB) capturada pelo botão.
+app.post('/admin/tim-session', express.text({ type: '*/*', limit: '8mb' }), (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  let body;
+  try { body = JSON.parse(req.body); } catch { return res.status(400).json({ error: 'json inválido' }); }
+  if (!body || body.secret !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
+  const st = body.state || {};
+  const temToken = !!(st.idb && st.idb.accessToken);
+  if (!temToken) return res.status(400).json({ error: 'nao_logado', msg: 'Capturei o TIM SEM login (sem accessToken). Entre no TIM logado e clique o botão lá dentro.' });
+  fs.mkdirSync(path.dirname(TIM_STORAGE), { recursive: true });
+  fs.writeFileSync(TIM_STORAGE, JSON.stringify(st));
+  console.log(`[admin] sessão do TIM salva (idb keys=${Object.keys(st.idb).length}).`);
+  res.json({ ok: true, salvo: true });
+});
+
+// Página que recebe a sessão do TIM via fragmento (#) e salva (contorna CSP do TIM).
+app.get('/admin/tim-recv', (_req, res) => {
+  res.type('html').send(`<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Enviando sessão TIM…</title>
+<style>body{margin:0;font:18px/1.6 system-ui,Arial;background:#0f1115;color:#e7eaf0;display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;padding:24px}.b{max-width:420px}.ok{color:#22c55e}.bad{color:#ef4444}.big{font-size:42px}</style></head>
+<body><div class="b"><div id="ic" class="big">⏳</div><h2 id="m">Enviando sessão do TIM…</h2><p id="s" style="color:#9aa3b2"></p></div>
+<script>(async function(){var ic=document.getElementById('ic'),m=document.getElementById('m'),s=document.getElementById('s');try{
+ var b64=location.hash.slice(1); if(!b64) throw new Error('Nada recebido. Clique o botão dentro do TIM logado.');
+ var state=JSON.parse(decodeURIComponent(escape(atob(b64))));
+ var r=await fetch('/admin/tim-session',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({secret:${JSON.stringify(SESSION_TOKEN)},state:state})});
+ var j=await r.json();
+ if(r.ok&&j.ok){ic.textContent='✅';ic.className='big ok';m.textContent='Sessão TIM salva!';s.textContent='Pode fechar esta aba.';}
+ else throw new Error(j.msg||j.error||('HTTP '+r.status));
+}catch(e){ic.textContent='❌';ic.className='big bad';m.textContent='Falha';s.textContent=String(e&&e.message||e);}})();</script></body></html>`);
+});
+
+// TESTE decisivo: injeta a sessão salva do TIM num headless e vê se fica logado.
+app.get('/admin/tim-login-test', async (req, res) => {
+  if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
+  let browser;
+  try {
+    const bundle = JSON.parse(fs.readFileSync(TIM_STORAGE, 'utf8'));
+    const sess = await openSession('tim', null); browser = sess.browser;
+    const page = sess.page;
+    await page.goto(TIM_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(6000); // headless estabelece a própria sessão Imperva + cria o IndexedDB
+    // injeta os tokens do app no IndexedDB (_ionicstorage/_ionickv)
+    await page.evaluate(async (idb) => {
+      await new Promise((resolve) => {
+        const open = indexedDB.open('_ionicstorage');
+        open.onupgradeneeded = () => { try { open.result.createObjectStore('_ionickv'); } catch (e) {} };
+        open.onsuccess = () => {
+          const db = open.result;
+          let store;
+          try { store = db.transaction('_ionickv', 'readwrite').objectStore('_ionickv'); }
+          catch (e) { return resolve(); }
+          for (const k in idb) { try { store.put(idb[k], k); } catch (e) {} }
+          store.transaction.oncomplete = () => resolve();
+          store.transaction.onerror = () => resolve();
+        };
+        open.onerror = () => resolve();
+      });
+    }, bundle.idb || {});
+    await page.goto(TIM_URL + '#/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(7000);
+    const info = await page.evaluate(() => ({ url: location.href, onLogin: location.href.includes('/login'), title: document.title }));
+    res.json({ ok: true, logado: !info.onLogin, info });
+  } catch (e) {
+    res.json({ ok: false, erro: e.message });
+  } finally {
+    if (browser) await browser.close();
+  }
+});
+
 // Dispara a análise de um lead manualmente (reprocessar). Protegido pelo token.
 app.get('/admin/run/:leadId', (req, res) => {
   if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
@@ -206,6 +276,17 @@ app.get('/admin', (_req, res) => {
     <p><a id="bm" class="btn" href="#">⬆ Enviar sessão Claro</a></p>
     <p class="hint">Não dá pra clicar nele aqui — ele só funciona quando você estiver <b>dentro do site do Claro</b>.</p>
   </div>
+
+  <div class="card">
+    <strong>Sessão do TIM Vendas (em teste):</strong>
+    <ol>
+      <li>Abra e faça login no <a class="link" href="${TIM_URL}" target="_blank" rel="noopener">TIM Vendas</a>.</li>
+      <li>Com o TIM aberto e logado, clique no botão <b>Enviar sessão TIM</b> dos favoritos.</li>
+    </ol>
+    <p class="hint">Instalar (só na 1ª vez): arraste o botão abaixo para a <b>barra de favoritos</b>.</p>
+    <p><a id="bmtim" class="btn" href="#" style="background:#004691">⬆ Enviar sessão TIM</a></p>
+    <p class="hint">Só funciona clicado <b>dentro do TIM Vendas logado</b>.</p>
+  </div>
 </div>
 <script>
   var RECV = location.origin + '/admin/recv';
@@ -226,6 +307,27 @@ app.get('/admin', (_req, res) => {
   var bm = document.getElementById('bm');
   bm.href = 'javascript:' + encodeURIComponent(code);
   bm.addEventListener('click', function(e){ e.preventDefault(); alert('Não clique aqui. Arraste este botão para a barra de favoritos e clique nele quando estiver no site do Claro (logado).'); });
+
+  // ---- Botão TIM (captura cookies+localStorage+IndexedDB do app Ionic) ----
+  var TIMRECV = location.origin + '/admin/tim-recv';
+  var codeTim = "(function(){try{" +
+    "if(location.hostname.indexOf('apptimvendas')<0){alert('Abra o TIM VENDAS (logado) e clique este botao LA DENTRO.');return;}" +
+    "(async function(){" +
+    "function openDB(){return new Promise(function(res){var r=indexedDB.open('_ionicstorage');r.onsuccess=function(){res(r.result)};r.onerror=function(){res(null)};});}" +
+    "var db=await openDB(); if(!db){alert('Nao achei o armazenamento do TIM.');return;}" +
+    "var idb={}; await new Promise(function(res){var tx=db.transaction('_ionickv','readonly').objectStore('_ionickv');var kr=tx.getAllKeys();kr.onsuccess=function(){var ks=kr.result;var vr=tx.getAll();vr.onsuccess=function(){ks.forEach(function(k,i){idb[String(k)]=vr.result[i]});res()}};kr.onerror=function(){res()}});" +
+    "if(!idb.accessToken){alert('Voce nao esta logado no TIM. Faca login e clique de novo.');return;}" +
+    "var keep=['accessToken','clientAccessToken','code','currentUser','AccessTokenExpiresIn','clientAccessTokenExpiresIn','jwtLastName','pdv','pdvInfo','promoter','isApp'];" +
+    "var slim={}; keep.forEach(function(k){ if(idb[k]!==undefined) slim[k]=idb[k]; });" +
+    "var ls={}; var rz=localStorage.getItem('reese84'); if(rz) ls.reese84=rz;" +
+    "var state={idb:slim, ls:ls};" +
+    "var b64=btoa(unescape(encodeURIComponent(JSON.stringify(state))));" +
+    "window.open(" + JSON.stringify(TIMRECV) + "+'#'+b64,'_blank');" +
+    "})();" +
+    "}catch(e){alert('Erro ao capturar sessão TIM: '+e);}})();";
+  var bmtim = document.getElementById('bmtim');
+  bmtim.href = 'javascript:' + encodeURIComponent(codeTim);
+  bmtim.addEventListener('click', function(e){ e.preventDefault(); alert('Não clique aqui. Arraste para os favoritos e clique DENTRO do TIM Vendas logado.'); });
 
   function refresh(){
     fetch('/admin/status').then(function(r){return r.json();}).then(function(s){
