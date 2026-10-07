@@ -3,14 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { enqueue, parseWebhook, loginStatus } from './creditFlow.js';
- 
+import { openSession } from './providers/_browser.js';
+
 const app = express();
 app.use(express.json({ limit: '1mb' }));
- 
+
 // Token exclusivo para upload de sessão (não é o WEBHOOK_SECRET).
 const SESSION_TOKEN = process.env.CLARO_SESSION_TOKEN || config.webhookSecret;
 const STORAGE = config.claro.storageState;
- 
+
 function sessionInfo() {
   try {
     const st = fs.statSync(STORAGE);
@@ -19,11 +20,11 @@ function sessionInfo() {
     return { existe: false, atualizadaEm: null, tamanho: 0 };
   }
 }
- 
+
 app.get('/', (_req, res) => {
   res.json({ ok: true, operadoras: config.enabledProviders, sessõesCaidas: loginStatus(), claroSessao: sessionInfo() });
 });
- 
+
 // ---------- Webhook do DataCrazy ----------
 app.post('/webhook/datacrazy', (req, res) => {
   if (req.headers['x-webhook-secret'] !== config.webhookSecret) {
@@ -32,7 +33,7 @@ app.post('/webhook/datacrazy', (req, res) => {
   const { leadId, stageName } = parseWebhook(req.body);
   console.log(`[webhook] lead=${leadId} etapa="${stageName}"`);
   res.json({ ok: true, received: true });
- 
+
   if (!leadId) {
     console.warn('[webhook] payload sem leadId:', JSON.stringify(req.body).slice(0, 500));
     return;
@@ -44,7 +45,7 @@ app.post('/webhook/datacrazy', (req, res) => {
   }
   enqueue(leadId);
 });
- 
+
 // ---------- Recebe a sessão capturada do Claro ----------
 // Aceita text/plain para evitar preflight de CORS (o botão envia no-cors).
 app.post('/admin/claro-session', express.text({ type: '*/*', limit: '4mb' }), (req, res) => {
@@ -74,10 +75,10 @@ app.options('/admin/claro-session', (_req, res) => {
   res.set('Access-Control-Allow-Headers', '*');
   res.status(204).end();
 });
- 
+
 // Status em JSON (a página consulta a cada poucos segundos).
 app.get('/admin/status', (_req, res) => res.json(sessionInfo()));
- 
+
 // Proxy de diagnóstico p/ a API do DataCrazy (achar ids de campos). Protegido pelo token.
 app.get('/admin/dc', async (req, res) => {
   if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
@@ -93,7 +94,32 @@ app.get('/admin/dc', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
- 
+
+// TESTE: abre o app do TIM headless (sem sessão) p/ ver se a Imperva bloqueia. Protegido.
+app.get('/admin/tim-probe', async (req, res) => {
+  if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
+  let browser;
+  try {
+    const sess = await openSession('tim', null); browser = sess.browser;
+    const page = sess.page;
+    await page.goto('https://apptimvendas.timbrasil.com.br/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(7000);
+    const info = await page.evaluate(() => ({
+      url: location.href,
+      title: document.title,
+      htmlLen: document.documentElement.outerHTML.length,
+      hasApp: !!document.querySelector('ion-app, app-root'),
+      bodyText: (document.body.innerText || '').slice(0, 300),
+      imperva: /Incapsula|_Incapsula|request unsuccessful|incident id|Request unsuccessful/i.test(document.documentElement.outerHTML),
+    }));
+    res.json({ ok: true, info });
+  } catch (e) {
+    res.json({ ok: false, erro: e.message });
+  } finally {
+    if (browser) await browser.close();
+  }
+});
+
 // Dispara a análise de um lead manualmente (reprocessar). Protegido pelo token.
 app.get('/admin/run/:leadId', (req, res) => {
   if (req.query.token !== SESSION_TOKEN) return res.status(401).json({ error: 'token inválido' });
@@ -103,7 +129,7 @@ app.get('/admin/run/:leadId', (req, res) => {
   console.log(`[admin] rodada manual enfileirada: ${leadId}`);
   res.json({ ok: true, enfileirado: leadId });
 });
- 
+
 // ---------- Recebe a sessão vinda do favorito (dados no fragmento #) ----------
 app.get('/admin/recv', (_req, res) => {
   res.type('html').send(`<!doctype html>
@@ -132,7 +158,7 @@ app.get('/admin/recv', (_req, res) => {
   })();
 </script></body></html>`);
 });
- 
+
 // ---------- Página de login diário ----------
 app.get('/admin', (_req, res) => {
   const claroUrl = config.claro.baseUrl;
@@ -163,12 +189,12 @@ app.get('/admin', (_req, res) => {
 <body><div class="wrap">
   <h1>Sessão do Claro Conexão</h1>
   <p class="sub">Faça isso 1x por dia para a análise de crédito continuar funcionando.</p>
- 
+
   <div class="card">
     <div class="status"><span id="dot" class="dot bad"></span><span id="st">verificando…</span></div>
     <div id="when" class="muted"></div>
   </div>
- 
+
   <div class="card">
     <strong>Como atualizar a sessão (todo dia):</strong>
     <ol>
@@ -200,7 +226,7 @@ app.get('/admin', (_req, res) => {
   var bm = document.getElementById('bm');
   bm.href = 'javascript:' + encodeURIComponent(code);
   bm.addEventListener('click', function(e){ e.preventDefault(); alert('Não clique aqui. Arraste este botão para a barra de favoritos e clique nele quando estiver no site do Claro (logado).'); });
- 
+
   function refresh(){
     fetch('/admin/status').then(function(r){return r.json();}).then(function(s){
       var dot=document.getElementById('dot'), st=document.getElementById('st'), when=document.getElementById('when');
@@ -213,7 +239,7 @@ app.get('/admin', (_req, res) => {
 </script>
 </body></html>`);
 });
- 
+
 app.listen(config.port, () => {
   console.log(`Serviço de consulta de crédito ouvindo na porta ${config.port}`);
   console.log(`Operadoras ativas: ${config.enabledProviders.join(', ')}`);
