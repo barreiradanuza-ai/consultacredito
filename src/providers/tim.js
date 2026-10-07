@@ -56,24 +56,33 @@ async function openTim() {
   return { browser, context, page };
 }
 
+// A página ATIVA do Ionic (as páginas anteriores ficam no DOM como .ion-page-hidden).
+function activePage(page) {
+  return page.locator('.ion-page:not(.ion-page-hidden)').last();
+}
 async function clickText(page, text) {
-  await page.getByText(text, { exact: true }).first().click({ timeout: 30000 });
+  const loc = page.getByText(text, { exact: true }).filter({ visible: true });
+  await loc.first().click({ timeout: 30000 });
 }
 async function clickBtn(page, re) {
-  await page.locator('button, ion-button, [ion-button]').filter({ hasText: re }).first().click({ timeout: 30000 });
+  const loc = page.locator('button, ion-button, [ion-button]').filter({ hasText: re }).filter({ visible: true });
+  await loc.first().click({ timeout: 30000 });
+}
+async function inputLoc(page, placeholder) {
+  return page.locator(`input[placeholder="${placeholder}"]`).filter({ visible: true }).first();
 }
 async function typeInto(page, placeholder, value) {
-  const el = page.locator(`input[placeholder="${placeholder}"]`).first();
+  const el = await inputLoc(page, placeholder);
   await el.click();
   await el.fill('');
   await el.pressSequentially(String(value), { delay: 40 });
 }
 async function fillText(page, placeholder, value) {
-  const el = page.locator(`input[placeholder="${placeholder}"]`).first();
+  const el = await inputLoc(page, placeholder);
   await el.fill(String(value));
 }
 async function valueOf(page, placeholder) {
-  try { return await page.locator(`input[placeholder="${placeholder}"]`).first().inputValue(); } catch { return ''; }
+  try { return await (await inputLoc(page, placeholder)).inputValue(); } catch { return ''; }
 }
 async function waitHash(page, part) {
   await page.waitForFunction((p) => location.hash.includes(p), part, { timeout: 40000 });
