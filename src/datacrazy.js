@@ -45,6 +45,38 @@ export function extractClientData(lead) {
   };
 }
  
+/** Lê os CAMPOS ADICIONAIS do lead (que NÃO vêm no GET do lead) → mapa {nomeDoCampo: valor}. */
+export async function getLeadAdditionalFields(leadId) {
+  try {
+    const data = await api(`/api/v1/crm/additional-fields/lead/${encodeURIComponent(leadId)}`);
+    const list = Array.isArray(data?.data) ? data.data : [];
+    const map = {};
+    for (const it of list) {
+      const name = it?.additionalField?.name;
+      const val = it?.value ?? it?.valueString ?? it?.valueNumber ?? it?.valueDate;
+      if (name && val != null && String(val) !== '') map[name] = val;
+    }
+    return map;
+  } catch (e) {
+    console.warn('[datacrazy] falha ao ler campos adicionais do lead:', e.message);
+    return {};
+  }
+}
+ 
+/**
+ * Monta os dados do cliente combinando campos NATIVOS + CAMPOS ADICIONAIS.
+ * Alguns leads têm CPF/Nome/Nascimento só nos campos adicionais (ex.: "Data de Nascimento").
+ */
+export async function buildCliente(leadId, lead) {
+  const f = config.datacrazy.fields;
+  const add = await getLeadAdditionalFields(leadId);
+  const first = (cands) => { for (const n of cands) { if (n && add[n] != null && String(add[n]) !== '') return add[n]; } return ''; };
+  const nome = lead?.name || first([f.nome, 'Nome Lead', 'Nome']);
+  const cpf = String(lead?.taxId || first([f.cpf, 'CPF Lead', 'CPF'])).replace(/\D/g, '');
+  const nascimento = lead?.birthDate || first([f.nascimento, 'Data de Nascimento', 'Nascimento Lead', 'Nascimento']);
+  return { nome, cpf, nascimento };
+}
+ 
 /** Resolve o ID real de um campo a partir do nome (ou do próprio id), lendo o lead. */
 export function resolveFieldId(lead, nameOrId) {
   const af = lead?.additionalFields;
