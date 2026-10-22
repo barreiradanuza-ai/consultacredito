@@ -74,3 +74,9 @@ API de bureau de crédito.)
 - [ ] Shape do `additionalFields` no PATCH (lista de `{id, value}`).
 - [ ] Textos dos selects e opções da janela de crédito de cada portal.
 - [ ] Palavras de aprovado/reprovado em `parseAprovacao` (`providers/_browser.js`).
+
+## Deploy (atual)
+
+O código em produção roda a partir de `SRC_BLOB_*` + `PATCH_B64` (env vars no Railway); os arquivos deste repo são sobrescritos no boot. Commits aqui servem para disparar build.
+
+- 2026-10-21: PATCH_B64 v3 (Claro retry no inconclusivo, NIO dialogs + Etapa 4 robusta, proxy residencial só na Claro).
